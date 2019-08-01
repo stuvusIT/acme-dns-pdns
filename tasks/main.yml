@@ -1,0 +1,51 @@
+---
+- name: Install dependencies
+  apt:
+    name:
+      - dnsutils
+      - python
+      - python-yaml
+
+- name: Create group
+  group:
+    name: acme-dns-pdns
+    system: true
+
+- name: Template script
+  template:
+    src: server.py.j2
+    dest: /usr/local/bin/acme-dns-pdns
+    owner: root
+    group: root
+    mode: 0755
+  notify: Restart acme-dns-pdns
+
+- name: Template configuration
+  copy:
+    dest: /etc/acme-dns-pdns.yml
+    content: "{{ config }}"
+    owner: root
+    group: acme-dns-pdns
+    mode: 0640
+  notify: Restart acme-dns-pdns
+
+- name: Template service
+  template:
+    src: acme-dns-pdns.service.j2
+    dest: /etc/systemd/system/acme-dns-pdns.service
+    owner: root
+    group: root
+    mode: 0644
+  register: service
+  notify: Restart acme-dns-pdns
+
+- name: Grant access to the pdns config
+  file:
+    path: /etc/powerdns/pdns.conf
+    group: acme-dns-pdns
+    mode: g+r
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+  when: service.changed
