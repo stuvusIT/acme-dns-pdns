@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+
+[Unit]
+Description=ACME HTTP/pdns proxy
+After=networking.target pdns.service
+Requires=pdns.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/acme-dns-pdns /etc/acme-dns-pdns.yml
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+User=nobody
+Group=acme-dns-pdns
+
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+
+LockPersonality=yes
+RestrictRealtime=yes
+PrivateMounts=yes
+PrivateUsers=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+
+# {{ ansible_managed }}
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import http.client
+from yaml import safe_load
+from sys import argv, exit
+import json
+import subprocess
+import time
+
+def patch_record(rrset, conn, headers, zone_url):
+  body = {
+    'rrsets': [rrset]
+  }
+  conn.request('PATCH', zone_url, body=json.dumps(body), headers=headers)
+  raw = conn.getresponse()
+  if raw.status != 204:
+    print('Patching record failed with error {} ({})'.format(raw.status, raw.read().decode()))
+    raise Exception()
+
+
+def notify_zone(conn, headers, zone_url):
+  conn.request('PUT', '{}/notify'.format(zone_url), headers=headers)
+  raw = conn.getresponse()
+  if raw.status != 200:
+    print('Notifying zone {} failed with error {} ({})'.format(zone_url, raw.status, raw.read().decode()))
+    raise Exception()
+
+
+def wait_for_replication(dig_host, zone_name, timeout=60):
+  # Wait for replication
+  master_soa = short_dig(['SOA', zone_name, '@{}'.format(dig_host)]).decode().split(' ')[2]
+  nameservers = short_dig(['NS', zone_name, '@{}'.format(dig_host)]).decode().split('\n')
+  for ns in nameservers:
+    if ns == '':
+      continue
+    for _ in range(timeout):
+      soa = short_dig(['SOA', zone_name, '@{}'.format(ns)]).decode().split(' ')[2]
+      if soa == master_soa:
+        break
+      time.sleep(1)
+
+
+def find_or_create_rrset(conn, headers, record_name, zone_url):
+  # Ensure valid data
+  rrset = {
+    'name': record_name,
+    'type': 'TXT',
+    'ttl': 120,
+    'records': []
+  }
+  # Find previous rrset
+  conn.request('GET', zone_url, headers=headers)
+  raw = conn.getresponse()
+  resp = json.loads(raw.read().decode())
+  for rr in resp['rrsets']:
+    if rr['name'] == record_name and rr['type'] == 'TXT':
+      rrset = rr
+  return rrset
+
+
+def find_zone(conn, headers, domain):
+  # Find correct zone
+  conn.request('GET', '/api/v1/servers/localhost/zones', headers=headers)
+  raw = conn.getresponse()
+  response = json.loads(raw.read().decode())
+  zone_name = ''
+
+  for zone in response:
+    if zone['kind'] == 'Slave':
+      continue
+    if domain.endswith(zone['name'][:-1]) and len(zone_name) < len(zone['name']):
+      zone_name = zone['name']
+      zone_url = zone['url']
+      return (zone_name, zone_url)
+  return ()  # TODO try if this works
+
+
+def fetch_api_key(path):
+  # Fetch API key
+  with open(path, 'r') as f:
+    for l in f:
+      line = l.strip()
+      if line and line.startswith('api-key = '):
+        api_key = line.split(' ')[2].strip()
+        break
+  assert api_key  # TODO this may be implicit by return
+  return api_key
+
+
+def short_dig(args):
+  cmd = ['dig', '+short'] + args
+  proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+  out, err = proc.communicate()
+  if err is not None:
+    print('Error {} when calling dig'.format(err))
+    sys.exit(1)
+  return out
+
+
+def delete_validation(conn, headers, record_name, zone_url):
+  try:
+    # Delete record
+    rrset = {
+      'name': record_name,
+      'type': 'TXT',
+      'changetype': 'DELETE'
+    }
+    patch_record(rrset, conn, headers, zone_url)
+    try:
+      notify_zone(conn, headers, zone_url)
+    except Exception:
+      pass
+    return 200
+  except Exception:
+    return 500
+
+
+def set_validation(conn, headers, record_name, zone_name, zone_url, validation):
+  global config
+  dig_host = config['dig_host']
+
+  # Check if record already exists
+  rrset = find_or_create_rrset(conn, headers, record_name, zone_url)
+  for record in rrset['records']:
+    if record['content'] == validation:
+      return 200  # Record is already set, nothing to do here
+
+  # Insert data
+  rrset['records'].append({
+    'content': validation,
+    'disabled': False
+  })
+  rrset['changetype'] = 'REPLACE'
+
+  try:
+    patch_record(rrset, conn, headers, zone_url)
+    notify_zone(conn, headers, zone_url)
+  except Exception:
+    return 500  # PATCH requests failed
+
+  wait_for_replication(dig_host, zone_name)
+  return 200  # OK
+
+
+class HTTPHandler(BaseHTTPRequestHandler):
+  def _handle(self, delete):
+    global config
+
+    dn_header = config['dn_header']
+
+    # Verify some headers
+    if self.headers.get(dn_header, '') not in config['acls']:
+      self.send_error(403, message='No permission to use this service')
+      return
+    if self.headers.get('Content-Type', '') != 'text/plain':
+      self.send_error(400, message='Invalid Content-Type')
+      return
+    if int(self.headers.get('Content-Length', 0)) < 2:
+      self.send_error(411, message='Content-Length missing')
+      return
+
+    # Fetch and parse body
+    content_length = int(self.headers.get('Content-Length', 0))
+    body = self.rfile.read(content_length).decode('utf8')
+    if body.count(' ') != (0 if delete else 1):
+      self.send_error(400, message='Invalid body')
+      return
+    body_parts = body.split(' ')
+    domain = body_parts[0]
+    if delete:
+      validation = ''
+    else:
+      validation = '"{}"'.format(body_parts[1])
+
+    # Verify whether this is legitimate
+    my_config = config['acls'][self.headers.get(dn_header)]
+    if '*' not in my_config and domain not in my_config:
+      self.send_error(403, message='You are not allowed to modify this record')
+      return
+
+    # Retrieve pdns API key
+    api_key_file = config['pdns_api_key_file'] if 'pdns_api_key_file' in config else '/etc/powerdns/pdns.conf'
+    with open(api_key_file) as f:
+      content = f.readlines()
+    api_key = None
+    for line in content:
+      if line.strip().startswith('api-key='):
+        api_key = line.strip().split('api-key=')[1]
+    if not api_key:
+      print('Could not parse API key from {}'.format(api_key_file))
+      return 500
+
+    # HTTP client
+    conn = http.client.HTTPConnection(config['pdns_host'])
+    headers = {
+      'Content-Type': 'application/json',
+      'X-Api-Key': api_key
+    }
+
+    record_name = '_acme-challenge.{}.'.format(domain)
+    print(
+      'Got {}request for record {} with validation "{}"'.format(('delete ' if delete else ''), record_name, validation))
+    try:
+      zone_name, zone_url = find_zone(conn, headers, domain)
+    except ValueError:
+      print('Couldn\' find zone for domain {}'.format(domain))
+      return 404
+
+    # Execute the command
+    if delete:
+      error = delete_validation(conn, headers, record_name, zone_url)
+    else:
+      error = set_validation(conn, headers, record_name, zone_name, zone_url, validation)
+
+    # Respond
+    self.send_response(error)
+    self.send_header('Content-type', 'text/plain')
+    self.end_headers()
+    message = 'Unknown error'
+    if error == 200:
+      message = 'OK'
+    elif error == 404:
+      message = 'No zone found'
+    elif error == 504:
+      message = 'Timeout while replicating zones'
+    elif error >= 500:
+      message = 'Internal error'
+    print('Returning code {} with message {}'.format(error, message))
+    self.wfile.write(bytes(message, 'utf8'))
+
+  def do_POST(self):
+    self._handle(delete=False)
+
+  def do_DELETE(self):
+    self._handle(delete=True)
+
+
+if len(argv) < 2:
+  print('You need to provide a config file as argument')
+  exit(1)
+with open(argv[1], 'r') as fd:
+  config = safe_load(fd)
+  listen_host = config['listen_host']
+  listen_port = config['listen_port']
+  print('Starting API at {}:{}'.format(listen_host, listen_port))
+  httpd = HTTPServer((listen_host, listen_port), HTTPHandler)
+  httpd.serve_forever()

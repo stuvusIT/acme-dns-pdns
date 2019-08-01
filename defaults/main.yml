@@ -1,0 +1,7 @@
+---
+acme_server_listen_host: 127.0.0.1
+acme_server_listen_port: 8000
+acme_server_dn_header: X-Client-DN
+acme_server_pdns_host: 127.0.0.1:8053
+acme_server_dig_host: 127.0.0.1
+acme_server_acls: {}

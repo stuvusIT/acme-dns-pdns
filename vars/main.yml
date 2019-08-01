@@ -1,0 +1,10 @@
+---
+config:
+  listen_host: "{{ acme_server_listen_host }}"
+  listen_port: "{{ acme_server_listen_port }}"
+  dn_header: "{{ acme_server_dn_header }}"
+
+  pdns_host: "{{ acme_server_pdns_host }}"
+  dig_host: "{{ acme_server_dig_host }}"
+
+  acls: "{{ acme_server_acls }}"

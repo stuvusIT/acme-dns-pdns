@@ -1,0 +1,6 @@
+---
+- name: Restart acme-dns-pdns
+  systemd:
+    name: acme-dns-pdns.service
+    state: restarted
+    enabled: true
