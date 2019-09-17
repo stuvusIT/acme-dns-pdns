@@ -231,6 +231,13 @@ class HTTPHandler(BaseHTTPRequestHandler):
     print('Returning code {} with message {}'.format(error, message))
     self.wfile.write(bytes(message, 'utf8'))
 
+  def do_GET(self):
+    # GET requests are only used for status checks
+    self.send_response(200)
+    self.send_header('Content-type', 'text/plain')
+    self.end_headers()
+    self.wfile.write(bytes('acme-server-pdns is running', 'utf8'))
+
   def do_POST(self):
     self._handle(delete=False)
 
