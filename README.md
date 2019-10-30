@@ -1,6 +1,6 @@
 # acme-dns-pdns
 
-This is the PowerDNS-compatible server part of [pdns-dns-client](https://github.com/stuvusIT/pdns-dns-client).
+This is the PowerDNS-compatible server part of [acme-dns-client](https://github.com/stuvusIT/acme-dns-client).
 It expects to be run behind a reverse proxy which verifies the certificates and sets the client certificate DN into a header.
 
 The ACL system works by allowing a DN (key of the dict) to request ceritificates for a list of names (the value) or a list consisting of the single element `*` which allows fetching certificates for all names.
