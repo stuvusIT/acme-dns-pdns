@@ -11,6 +11,12 @@
     name: acme-dns-pdns
     system: true
 
+- name: Create user
+  user:
+    name: acme-dns-pdns
+    group: acme-dns-pdns
+    state: present
+
 - name: Template script
   template:
     src: server.py.j2
@@ -24,7 +30,7 @@
   copy:
     dest: /etc/acme-dns-pdns.yml
     content: "{{ config }}"
-    owner: root
+    owner: acme-dns-pdns
     group: acme-dns-pdns
     mode: 0640
   notify: Restart acme-dns-pdns
@@ -43,6 +49,7 @@
 - name: Grant access to the pdns config
   file:
     path: /etc/powerdns/pdns.conf
+    owner: acme-dns-pdns
     group: acme-dns-pdns
     mode: g+r
 

@@ -17,15 +17,13 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 
-User=nobody
+User=acme-dns-pdns
 Group=acme-dns-pdns
 
 CapabilityBoundingSet=
 NoNewPrivileges=yes
 
-LockPersonality=yes
 RestrictRealtime=yes
-PrivateMounts=yes
 PrivateUsers=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_INET AF_INET6
