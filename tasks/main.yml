@@ -32,7 +32,7 @@
     content: "{{ config }}"
     owner: acme-dns-pdns
     group: acme-dns-pdns
-    mode: 0640
+    mode: 0440
   notify: Restart acme-dns-pdns
 
 - name: Template service
@@ -49,7 +49,6 @@
 - name: Grant access to the pdns config
   file:
     path: /etc/powerdns/pdns.conf
-    owner: acme-dns-pdns
     group: acme-dns-pdns
     mode: g+r
 
