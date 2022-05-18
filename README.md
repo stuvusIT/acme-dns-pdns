@@ -9,7 +9,7 @@ After the record was changed, the secondaries are notified and the server waits 
 
 ## Requirements
 
-Debian
+Debian 11
 
 ## Role Variables
 
