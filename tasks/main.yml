@@ -45,6 +45,12 @@
   register: service
   notify: Restart acme-dns-pdns
 
+- name: Enable and start service
+  service:
+    name: acme-dns-pdns.service
+    enabled: true
+    state: started
+
 - name: Grant access to the pdns config
   file:
     path: /etc/powerdns/pdns.conf
